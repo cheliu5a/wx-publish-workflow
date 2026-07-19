@@ -1,5 +1,7 @@
 # WeChat Publishing Workflow Skills
 
+English | [中文](./README.zh.md)
+
 A collection of [Siada](https://siada.ai) skills for publishing technical articles from Feishu (Lark) to WeChat Official Account with professional diagrams and code compliance review.
 
 ## Skills Included
