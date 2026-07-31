@@ -67,6 +67,7 @@ All five modes follow the same loop:
 1. **Read first**: the schema (`schemas/<type>.schema.json`) and the complete worked example (`examples/*.{architecture,workflow,sequence,dataflow,lifecycle}.json`) — copy its patterns instead of guessing field shapes.
 2. Write `<name>.<type>.json`.
 3. Render: `node bin/archify.mjs render <type> <input>.json <output>.html` (paths relative to this skill's folder).
+   > ⚠️ **渲染完成后如需截图嵌入文章，必须执行本文件末尾的"导出 PNG 嵌入文章的标准操作流程"，三步缺一不可（删 toolbar/footer DOM → `?theme=light` 截图 → PIL smart_crop）。直接截图会出现暗色背景、右上角按钮、图片不完整、大面积空白。**
 4. Validate the generated artifact: `node bin/archify.mjs validate <type> <input>.json --json`, or check an existing HTML file with `node bin/archify.mjs check <output>.html`. This catches malformed SVG output, non-finite SVG values, two-point diagonal arrows, and arrows crossing the legend.
 5. If either step fails, the error names the JSON path or the fix (thresholds, valid ranges, which knob to change). Fix the JSON and re-run; never edit the renderer.
 
@@ -288,57 +289,118 @@ A single self-contained `.html`: embedded CSS (Google Fonts loads async and degr
 | 问题 | 原因 | 解决方案 |
 |------|------|---------|
 | 截图是暗色（深色背景）| archify HTML 读取 `localStorage` 或系统主题，headless Chrome 默认 dark | 截图 URL 加 `?theme=light` 强制亮色主题 |
-| 图片右上角出现 Light/Dark 切换按钮和 Export 按钮 | archify 内置 `.toolbar` UI 组件 | 截图前注入 CSS 隐藏 `.toolbar` |
-| 图片底部出现 "Data-flow diagram · archify" 水印文字 | archify 内置 `.footer` 组件 | 截图前注入 CSS 隐藏 `.footer` |
+| 图片右上角出现 Light/Dark 切换按钮和 Export 按钮 | archify JS 在页面加载后动态显示 `.toolbar`，CSS `display:none` 会被 JS 覆盖 | **截图前直接从 HTML 删除 toolbar DOM 节点**（见下方脚本步骤1）|
+| 图片底部出现 "xxx diagram · archify" 水印文字 | archify 内置 `<p class="footer">` 元素 | **截图前直接从 HTML 删除 footer DOM 节点**（见下方脚本步骤1）|
 | 图片底部大量空白 | headless 截图窗口高度（如 3000px）远大于图表实际内容高度 | 截图后用 PIL 自动裁剪空白区域 |
+| 图片四周大量灰色空白（左右对称）| archify 页面有左右 padding / margin，背景色 `(248,250,252)` 与外部空白色相近，threshold 裁剪失效 | **用背景色差异（tolerance）裁剪**，而非固定亮度阈值 |
+| 图表下方出现默认英文 Legend（如 Frontend, Backend, primary data）| archify 模板自带默认图例文本 | **截图前务必编辑 HTML 将默认英文图例文本替换为符合当前文章语境的中文词汇** |
+| sequence 图右侧大量空白 | 消息 label 文字太长，标注延伸到参与者区域右侧 | 缩短消息 label，保留关键词，避免写完整函数签名 |
+
+> ⚠️ **关键经验**：不能用 CSS `display:none` 隐藏 toolbar，archify 的 JS 脚本在 `DOMContentLoaded` 后会重新设置 `style.display`，导致 CSS 被覆盖。**唯一可靠的方法是在截图前直接从 HTML 文件中删除 toolbar 和 footer 的 DOM 节点。**
 
 ### 标准截图脚本（推荐）
 
 ```bash
-# 1. 先注入 CSS 隐藏 toolbar 和 footer（在所有 HTML 文件上操作）
-python3 << 'EOF'
-files = [
-    "diagram1.html",
-    "diagram2.html",
-]
-hide_css = '<style>.toolbar{display:none!important}.footer{display:none!important}</style>'
-for fname in files:
-    with open(fname, 'r', encoding='utf-8') as f:
-        content = f.read()
-    if hide_css not in content:
-        content = content.replace('</head>', hide_css + '\n</head>', 1)
-    with open(fname, 'w', encoding='utf-8') as f:
-        f.write(content)
-    print(f"已处理: {fname}")
-EOF
+# 步骤1：直接从 HTML 删除 toolbar DOM 节点 和 footer DOM 节点
+# （不能用 CSS 注入，JS 会覆盖 display:none）
+python3 << 'PYEOF'
+import re
 
-# 2. 用 headless Chrome 截图（关键：URL 加 ?theme=light）
+def remove_toolbar_footer(html_path):
+    with open(html_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # 删除整个 <div class="toolbar" ...>...</div> 块（含所有子节点）
+    start_marker = '<div class="toolbar"'
+    start_idx = content.find(start_marker)
+    if start_idx >= 0:
+        depth = 0
+        i = start_idx
+        while i < len(content):
+            if content[i:i+4] == '<div':
+                depth += 1; i += 4
+            elif content[i:i+6] == '</div>':
+                depth -= 1; i += 6
+                if depth == 0:
+                    content = content[:start_idx] + content[i:]; break
+            else:
+                i += 1
+    
+    # 删除 <p class="footer">...</p>
+    content = re.sub(r'<p class="footer">.*?</p>', '', content, flags=re.DOTALL)
+    
+    with open(html_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f"已清理: {html_path}")
+
+import glob
+for fname in glob.glob("*.html"):
+    remove_toolbar_footer(fname)
+PYEOF
+
+# 步骤2：用 headless Chrome 截图（关键：URL 加 ?theme=light，加 --force-device-scale-factor=2 生成高清图）
 for f in diagram1 diagram2; do
   google-chrome --headless --no-sandbox --disable-gpu \
-    --screenshot="${f}-light.png" --window-size=1200,3000 --hide-scrollbars \
+    --screenshot="${f}-light.png" --window-size=1400,3000 --hide-scrollbars \
+    --force-device-scale-factor=2 \
     "file://$(pwd)/${f}.html?theme=light" 2>/dev/null
 done
 
-# 3. 用 PIL 自动裁剪空白（保留 20px padding）
+# 3. 用 PIL + numpy 自动裁剪空白（保留 30px padding）
+#
+# ⚠️ 重要：archify light 主题背景色为 (248, 250, 252)，不是纯白 (255,255,255)。
+# 图表内容区域（卡片/节点）的底色也是接近背景的浅灰，用固定亮度阈值（如 <235）
+# 无法区分背景和内容，导致左右大面积灰色空白无法裁掉。
+#
+# 正确做法：先采样图片四个角落的平均颜色作为背景色，
+# 再用"与背景色的最大通道差异 > tolerance"来检测内容像素。
 python3 << 'EOF'
-from PIL import Image, ImageChops
+from PIL import Image
+import numpy as np
 import glob
 
+PAD = 30
+TOLERANCE = 8  # 与背景色的最大通道差异超过此值即视为内容像素
+
+def smart_crop(input_path, output_path, tolerance=TOLERANCE, padding=PAD):
+    img = Image.open(input_path).convert('RGB')
+    arr = np.array(img)
+    h, w = arr.shape[:2]
+
+    # 采样四角 10×10 区域的中位数作为背景色（比取角落单点更稳定）
+    corners = np.concatenate([
+        arr[:10, :10].reshape(-1, 3),
+        arr[:10, -10:].reshape(-1, 3),
+        arr[-10:, :10].reshape(-1, 3),
+        arr[-10:, -10:].reshape(-1, 3),
+    ], axis=0)
+    bg_color = np.median(corners, axis=0)  # e.g. [248, 250, 252]
+
+    # 找到与背景色差异超过 tolerance 的像素（真正的内容）
+    diff = np.abs(arr.astype(int) - bg_color).max(axis=2)
+    mask = diff > tolerance
+
+    rows = np.any(mask, axis=1)
+    cols = np.any(mask, axis=0)
+
+    if not rows.any():
+        print(f"[WARN] No content found, skipping: {input_path}")
+        return
+
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+
+    x0 = max(0, cmin - padding)
+    y0 = max(0, rmin - padding)
+    x1 = min(w, cmax + padding + 1)
+    y1 = min(h, rmax + padding + 1)
+
+    cropped = img.crop((x0, y0, x1, y1))
+    cropped.save(output_path)
+    print(f"{input_path}: {img.size} → {cropped.size} (bg={bg_color.astype(int).tolist()})")
+
 for fname in glob.glob("*-light.png"):
-    img = Image.open(fname).convert("RGB")
-    bg = img.getpixel((0, 0))
-    bg_img = Image.new("RGB", img.size, bg)
-    diff = ImageChops.difference(img, bg_img)
-    bbox = diff.getbbox()
-    if bbox:
-        pad = 20
-        x0 = max(0, bbox[0] - pad)
-        y0 = max(0, bbox[1] - pad)
-        x1 = min(img.width, bbox[2] + pad)
-        y1 = min(img.height, bbox[3] + pad)
-        cropped = img.crop((x0, y0, x1, y1))
-        cropped.save(fname)
-        print(f"{fname}: {img.size} → {cropped.size}")
+    smart_crop(fname, fname)
 EOF
 ```
 
