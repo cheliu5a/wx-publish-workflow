@@ -1,42 +1,162 @@
 ---
 name: wx-publish-workflow
-description: 将飞书文档发布为微信公众号文章的完整工作流。先按公众号风格规范（导语 + 图文并茂 + 多图表）对文章进行改写润色，再用 archify 根据文章技术内容生成专业架构图/流程图/时序图/数据流图（输出独立 HTML 文件，支持导出 PNG/SVG），嵌入文章后用 wx-article-code-review 审查源码合规（含通过 aosp-linux-source 对照 AOSP/Linux 上游源码进行技术准确性校验），通过后用 feishu-wechat-cli 直接发布到微信草稿箱。适用场景：用户说"发公众号"、"把飞书文档发到公众号"、"发布文章"、"公众号发布流程"、"按工作流发布"。
+description: Use when publishing a Feishu doc or local Markdown article to a WeChat Official Account draft in this environment, especially when the workflow should include rewriting, review, cover generation, and archive steps.
 ---
 
 # 公众号发布工作流
 
-```
-飞书文档
-   ↓
-【Step 1.2 风格改写润色】← 导语 + 图文并茂 + 多图表（ASCII/表格）
-   ↓
-【Step 1.3 archify 图表生成】← 根据技术内容生成架构图/流程图/时序图/数据流图（HTML+PNG）
-   ↓
-【Step 1.5 wx-article-code-review】← 合规审查 + aosp-linux-source 源码校验
-   ↓ 通过（无 🚫 RED 项）
-【人工确认】← 确认内容无误
-   ↓
-【Step 2 feishu-wechat-cli】← 直接发布到微信草稿箱（需 AppID/Secret）
-```
+这个 skill 负责把一篇文章从“已有内容”推进到“微信草稿箱 + 飞书归档”。
 
----
+它是一个总控 workflow，用来判断入口、编排步骤、约束最低交付门槛，并把详细规则路由到对应支持文档。为了保证功能不缩水，凡是进入某个阶段，就必须同时遵守主文件和对应支持文档的要求。
+
+## 何时使用
+
+在以下场景使用本 skill：
+
+- 用户明确说“发公众号”“发布到公众号”“把飞书文档发到微信公众号”
+- 用户已经有飞书文档或本地 Markdown，希望按固定流程发布到微信草稿箱
+- 用户希望先整理一批可分享的 Skills，再写成公众号文章发布
+- 用户希望发布前包含内容润色、图表补强、合规审查、封面生成和归档
+
+## 不适用场景
+
+以下情况不要直接套用整套 workflow：
+
+- 只是想写文章，不打算发到微信草稿箱
+- 只是想做封面图，不需要文章改写和发布
+- 只是想把 Markdown 转成飞书文档归档
+- 没有微信公众号发布凭证，且当前任务不要求走真实发布链路
+- 短通知、纯新闻快讯、无结构公告，不值得套用完整图表和封面流程
+
+## 支持文档
+
+以下支持文档是本 skill 的正式组成部分，不是可选参考。命中对应阶段时，必须读取并遵守：
+
+- [`docs/entry-b-find-skills.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/entry-b-find-skills.md:1)：入口 B 的候选发现、质量筛选、Skill 卡片和文章草稿组织规则
+- [`docs/style-guide.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/style-guide.md:1)：正文改写规范、故事钩子、金字塔结构、图文密度与检查清单
+- [`docs/archify-requirements.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/archify-requirements.md:1)：`archify` 图表数量、类型分布、导出要求、时序图布局和验收清单
+- [`docs/archify-export-sop.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/archify-export-sop.md:1)：`archify` 删除 toolbar/footer、Chrome 截图、Retina 参数、背景色差异裁剪的详细脚本
+- [`docs/review-cover-postpublish.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/review-cover-postpublish.md:1)：源码审查、封面生成、封面导出和发布后三问的详细要求
+
+## 依赖分层
+
+### 必需依赖
+
+- `feishu-wechat-cli`：发布到微信草稿箱
+- `lark-doc` 或等价方式：从飞书读取正文
+
+### 强烈建议依赖
+
+- `wx-article-code-review`：发布前做合规和技术审查
+- `article-to-lark-doc`：发布后归档带图版本
+- `archify`：为技术文章生成高质量图表
+
+### 可选增强依赖
+
+- `find-skills`：当文章入口是“先发现 Skills 再写推荐文”
+- `guizang-social-card-skill`：生成主封面和方形封面
+- `aosp-linux-source`：当文章涉及 AOSP/Linux 源码核实时使用
+
+## 降级规则
+
+当某个依赖不可用时，按以下方式降级，不要卡死在中间步骤：
+
+- 缺少 `find-skills`：跳过线上发现入口，只处理现有文章
+- 缺少 `archify`：保留 ASCII 图和 Markdown 表格，不阻塞发布
+- 缺少 `wx-article-code-review`：至少做一轮人工可读的公开信息合规检查，并明确标注“未完成正式审查”
+- 缺少 `guizang-social-card-skill`：从正文中选一张最相关、无私有信息的图片作为临时封面
+- 缺少 `article-to-lark-doc`：发布后仅保留本地 Markdown 和图片文件，并说明未完成飞书归档
+- 缺少 `aosp-linux-source`：不要伪造源码核实结果，明确标注“待人工核实上游源码”
+
+降级只影响执行路径，不影响质量说明义务。凡是跳过的环节，都必须明确标注为“未完成”或“已降级处理”。
+
+如果依赖本身存在，但外部网站、上游源码站或网络条件导致该环节无法真正完成，也按同样规则处理：不得假装已完成验证，必须显式标注“未完成”或“待人工核实”。
+
+## 交付级别
+
+### P0 必须完成
+
+- 得到可发布的 `article.md` 或等价正文
+- 存在可用封面图 `article-cover.png`
+- 文章经过至少一轮发布前检查
+- 成功进入微信草稿箱，或明确说明为什么未能发布
+
+### P1 强烈建议完成
+
+- 内容按公众号风格改写
+- 技术文章补充图表或表格
+- 完成正式 code review / 源码核实
+- 发布后归档到飞书文档
+
+### P2 可选增强
+
+- 从线上发现 Skills 并组织成推荐文
+- 生成 21:9 主封面和 1:1 方形封面
+- 在用户明确不需要互动时，才跳过发布后的 3 个理解问题
+
+## 入口判断
+
+按下面顺序判断入口：
+
+1. 用户已经提供飞书文档链接或本地 Markdown：走“入口 A”
+2. 用户要“推荐一批 skills 并发公众号”：走“入口 B”
+3. 两种材料都没有：先让用户提供文章来源，或说明当前只能输出草稿，不能真实发布
+
+## 总流程
+
+```text
+入口 A：已有文章
+飞书文档 / 本地 Markdown
+  -> 读取正文
+  -> 改写润色
+  -> 图表补强
+  -> 发布前审查
+  -> 封面生成
+  -> 人工确认
+  -> 发布到微信草稿箱
+  -> 归档到飞书文档
+
+入口 B：先发现 Skills 再成文
+find-skills 发现候选
+  -> 质量筛选
+  -> 生成卡片和文章草稿
+  -> 接入入口 A 的“改写润色”步骤继续执行
+```
 
 ## 前置条件
 
-在工作目录准备 `.env` 文件：
+在工作目录准备 `.env`：
 
 ```bash
 WECHAT_APP_ID=你的公众号AppID
 WECHAT_APP_SECRET=你的公众号AppSecret
 ```
 
-还需把当前机器 IP 加入公众号后台白名单（安全中心 → IP 白名单，`curl ifconfig.me` 查询当前 IP）。
+还需把当前机器出口 IP 加入公众号后台白名单。
 
----
+```bash
+curl ifconfig.me
+```
 
-## Step 1：读取飞书文档
+## 入口 B：先发现 Skills 再整理成文
 
-用 `lark-doc` 读取飞书文档内容（如已有本地 Markdown 可跳过）：
+只有当用户明确要“找几个 skills 推荐给大家”“整理 skills 发公众号”时才走这一入口。
+
+进入该入口后，必须读取并遵守：
+
+- [`docs/entry-b-find-skills.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/entry-b-find-skills.md:1)
+
+主文件只保留入口判断和衔接逻辑；候选发现、质量筛选、Skill 卡片格式、文章草稿结构和完成清单都以支持文档为准。
+
+硬规则：入口 B 产出的 `article.md` 只是草稿，后续必须进入 Step 2 做公众号风格改写，不能跳过改写直接进入发布。
+
+## 主线步骤
+
+### Step 1：读取正文
+
+如果用户给的是飞书文档，优先用 `lark-doc` 读取为 Markdown；如果用户已经给了本地 Markdown，可直接进入下一步。
+
+示例：
 
 ```bash
 lark-cli docs +fetch --api-version v2 \
@@ -44,162 +164,142 @@ lark-cli docs +fetch --api-version v2 \
   --doc-format markdown --as user > article.md
 ```
 
----
+### Step 2：按公众号风格改写正文
 
-## Step 1.2：按公众号风格规范改写润色
+目标不是“把原文重新说一遍”，而是把文章整理成适合公众号阅读的结构。
 
-拿到原始 Markdown 后，按以下风格规范对文章进行改写，**直接输出改写后的完整 Markdown**（在原文件上修改）：
+进入本步骤后，必须读取并遵守：
 
-### 🎯 风格规范
+- [`docs/style-guide.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/style-guide.md:1)
 
-#### 1. 导语（必须有）
+主文件只保留该步骤的目标；故事钩子、金字塔结构、图文密度、标题层级和改写检查清单都以支持文档为准。
 
-- 文章开头（正文第一段，在标题下方、第一个二级标题之前）必须有一段 **100~200 字的导语**
-- 导语用「场景切入」或「问题钩子」的方式引出主题，让读者快速感知文章价值
-- 示例格式：
-  ```
-  你知道拍一张照片，数据是怎么从摄像头流向屏幕的吗？……
-  让这条链路高效运转的幕后英雄，叫做 `dma-buf`。……
-  ```
+### Step 3：补充专业图表
 
-#### 2. 图文并茂（必须有图 / 图表）
+如果文章是技术分析、架构拆解、源码机制说明，优先调用 `archify` 补专业图表；如果 `archify` 不可用，则保留 ASCII 图和表格即可。
 
-- 每个一级概念（每个大章节）至少配一个可视化元素：ASCII 流程图、Markdown 表格、或代码 + 注释
-- 优先顺序：**ASCII 流程图 > Markdown 表格 > 代码块注释**
-- 微信不支持 Mermaid 渲染，统一改用 ASCII 流程图或表格
+进入本步骤且实际调用 `archify` 时，必须读取并遵守：
 
-#### 3. 图表密度要求
+- [`docs/archify-requirements.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/archify-requirements.md:1)
+- [`docs/archify-export-sop.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/archify-export-sop.md:1)
 
-- 文章中 **表格数量 ≥ 3**（关键 API 对比、参数说明、场景对比等都用表格呈现）
-- 文章中 **ASCII 流程图 / 示意图 ≥ 2**（数据流向、生命周期、调用链等用 ASCII 图呈现）
-- 避免连续超过 3 段纯文字，超过则插入一张图或一个表格打断
+主文件只保留是否进入图表阶段的判断；图表数量门槛、类型分布、PNG 导出要求、时序图布局和图表验收清单都以支持文档为准。
 
-#### 4. 段落节奏
+硬规则：只要进入 `archify` 图表阶段，生成 HTML、删除 toolbar/footer、headless Chrome 截图、背景色差异裁剪、嵌回正文都属于必须子步骤；不能只生成 HTML 或只截图就算完成。
 
-- 每段不超过 5 句话，避免大段密集文字
-- 重要结论用 `> 引用块` 或加粗单独成行突出
-- 列表（`-`）用于枚举，表格用于对比，流程图用于流程
+### Step 4：发布前审查
 
-#### 5. 标题层级
+优先调用 `wx-article-code-review`。如果文章涉及 AOSP/Linux 机制，再结合 `aosp-linux-source` 做上游核实。
 
-- 一级标题（`#`）：仅文章标题
-- 二级标题（`##`）：大章节（如「一、为什么需要...」「二、架构全景图」）
-- 三级标题（`###`）：小节
+进入本步骤后，必须读取并遵守：
 
-### 🔧 改写操作清单
+- [`docs/review-cover-postpublish.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/review-cover-postpublish.md:1)
 
-改写时逐项检查：
+其中 Step 1.5 对应的合规扫描、源码核实、优化润色、通过条件都以支持文档为准。
 
-- [ ] 文章开头是否有导语（100~200 字）？没有则补写
-- [ ] 每个大章节是否有 ASCII 图或表格？没有则补充
-- [ ] 全文表格数量是否 ≥ 3？不足则将适合表格化的内容转为表格
-- [ ] 全文 ASCII 流程图是否 ≥ 2？不足则补充架构图或数据流图
-- [ ] 有无连续 3 段以上纯文字段落？有则插入图表打断
-- [ ] 重要结论是否突出显示？
+### Step 5：生成封面
 
----
+正式发布前必须有封面图，但默认策略是“生成封面优先，正文选图兜底”。不要把“从正文随便抓一张技术图”当成默认方案。
 
-## Step 1.3：archify 专业技术图表生成
+进入本步骤后，必须继续遵守：
 
-完成风格改写后，分析文章的技术内容，用 `archify` skill 为文章生成专业的可视化图表，**输出为独立 HTML 文件**（内嵌 SVG，支持明暗主题切换，可一键导出 PNG/SVG）。
+- [`docs/review-cover-postpublish.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/review-cover-postpublish.md:1)
 
-### 📊 图表类型选择
+其中 Step 1.9 对应的封面内容提取、主封面和方形封面规格、导出操作、兜底方案和验收清单都以支持文档为准。
 
-根据文章内容匹配最合适的图表类型：
+### Step 6：人工确认
 
-| 文章内容类型 | archify 图表类型 | 典型场景 |
-|------------|---------------|---------|
-| 系统架构、模块组成、组件关系 | `architecture` | 内核子系统架构、驱动框架、SoC 结构 |
-| 调用流程、数据处理管道、审批链路 | `workflow` | 系统调用链、驱动初始化流程、CI/CD |
-| API 交互、请求生命周期、跨模块调用 | `sequence` | 内核/用户态交互、IPC 调用链、DMA 传输 |
-| 数据流向、缓冲区传递、管道/ETL | `dataflow` | dma-buf 共享链路、内存拷贝路径、数据总线 |
-| 状态机、生命周期、状态转换 | `lifecycle` | buffer 生命周期、进程状态、设备电源状态 |
+在真正发布前，必须让用户或执行者确认以下几点：
 
-### 🔧 图表生成操作
+- 标题和导语没有偏题
+- 图表没有暴露内部信息
+- 封面可接受
+- 文章已通过基本审查
 
-1. **分析文章**：识别哪些章节最适合用专业图表替换或补充 ASCII 图
-2. **选择类型**：根据上表选择最匹配的 archify 图表类型
-3. **生成图表**：调用 archify skill 生成，每张图输出为独立 HTML 文件，命名格式：`<文章名>-<图表描述>.<类型>.html`
+如果用户没有明确确认，可以继续准备草稿，但不要假装“已获确认”。
+
+硬规则：没有人工确认时，可以继续整理草稿，但不得执行真实发布到微信草稿箱。
+
+### Step 7：发布到微信草稿箱
+
+在工作目录执行，目录内需有 `.env`。
 
 ```bash
-# 示例：生成 dma-buf 数据流图
-node ~/.siada-cli/skills/archify/bin/archify.mjs render dataflow dma-buf.dataflow.json dma-buf-dataflow.html
-
-# 示例：生成架构图
-node ~/.siada-cli/skills/archify/bin/archify.mjs render architecture dma-buf.architecture.json dma-buf-arch.html
-```
-
-4. **导出 PNG**：打开 HTML 文件，点击右上角导出菜单，选择「Download PNG」（最高 4× 分辨率），保存为 `<图表名>.png`
-5. **嵌入文章**：将 PNG 图片插入 `article.md` 对应章节，替换该章节原有的 ASCII 示意图，或作为补充图表添加
-
-### ✅ 图表生成清单
-
-- [ ] 是否有系统/组件架构图（整体架构章节）？
-- [ ] 是否有核心数据流图或调用时序图（关键流程章节）？
-- [ ] 每张 archify 图表是否已导出 PNG 并嵌入文章对应位置？
-- [ ] ASCII 流程图与 archify PNG 是否互补（不重复）？
-
----
-
-## Step 1.5：源码合规审查 + 源码校验 & 优化润色
-
-对 `article.md` 触发 `wx-article-code-review` skill，执行完整的五步审查：
-
-> 说：「帮我审查 article.md，看看有没有内部代码，并对照 AOSP/Linux 源码优化润色」
-
-**该步骤包含**：
-1. 合规性扫描（无企业私有代码）
-2. 通过 `aosp-linux-source` skill 在线核实关键符号（elixir.bootlin.com / cs.android.com）
-3. 源码级优化润色建议：
-   - 修正技术描述与上游源码不符之处
-   - 补充源码注释中的关键信息
-   - 为代码片段标注来源文件路径
-   - 标注内核版本差异
-
-**审查通过条件**：无 🚫 RED 项。
-
-**优化润色**（可选）：根据审查报告中的「Step 5 优化建议」修改文章，再次确认后进入 Step 2。
-
----
-
-## Step 2：feishu-wechat-cli 发布到草稿箱
-
-在工作目录执行（含 `.env` 文件）：
-
-```bash
-# 从飞书文档直接发布（推荐）
+# 从飞书文档直接发布
 feishu-wechat publish --feishu "https://your.feishu.cn/wiki/xxxx" \
   --article-title "文章标题" \
   --article-author "作者名"
 
-# 或从本地 Markdown 发布（Step 1 已抓取的 article.md，需有封面图）
-feishu-wechat publish -f article.md
+# 或从本地 Markdown 发布
+feishu-wechat publish -f article.md --article-cover ./article-cover.png
 ```
 
-成功输出：
-```
-发布成功，Media ID: xxxxx
-```
+成功标志：输出包含类似“发布成功，Media ID: xxxxx”的结果。
 
----
+如果发布失败，要优先检查：
 
-## 各 Skill 分工
+- AppID / Secret 是否正确
+- IP 是否已加白名单
+- 正文是否缺标题
+- 封面路径是否有效
 
-| Step | Skill / 工具 | 职责 |
-|------|-------------|------|
-| Step 1 | `lark-doc` / `lark-wiki` | 读取飞书文档内容，输出原始 Markdown |
-| Step 1.2 | Siada（本 skill 内嵌指令） | 按风格规范改写润色：补导语、补图表、优化段落节奏 |
-| Step 1.3 | `archify` | 根据文章技术语言生成专业架构图/流程图/时序图/数据流图/生命周期图，输出独立 HTML + 可导出 PNG/SVG，嵌入文章 |
-| Step 1.5 | `wx-article-code-review` | 合规审查 + aosp-linux-source 源码校验 + 技术准确性优化 |
-| Step 1.5 | `aosp-linux-source` | 通过 elixir.bootlin.com / cs.android.com 在线核实 AOSP/Linux 源码 |
-| Step 2 | `feishu-wechat-cli` | 从本地 Markdown 或飞书直接抓取，发布到微信草稿箱（自带 wenyan 排版） |
+### Step 8：归档到飞书文档
 
----
+发布成功后，优先调用 `article-to-lark-doc`，把包含图片的最终版本归档到飞书文档。
+
+归档目标：
+
+- 保留最终正文版本
+- 保留图片引用关系
+- 输出最终飞书文档链接
+
+如果归档失败，至少保留本地 `article.md`、封面和配图，并说明“微信已发布，飞书归档未完成”。
+
+### Step 9：发布后三问
+
+默认应执行发布后三问；只有当用户明确只要求发布、不要求互动时，才可跳过，但跳过时必须显式说明。
+
+进入本步骤后，必须继续遵守：
+
+- [`docs/review-cover-postpublish.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/review-cover-postpublish.md:1)
+
+其中题目数量、题型范围、提问格式和回答后的处理方式都以支持文档为准。
 
 ## 常见问题
 
-- **invalid ip**：`curl ifconfig.me` 查出口 IP，去公众号后台安全中心加白名单
-- **invalid appid or secret**：检查 `.env` 中 `WECHAT_APP_ID`/`WECHAT_APP_SECRET`
-- **未能找到文章标题**：在 Markdown 文件顶部加 frontmatter（`title: 你的标题`）
-- **必须指定一张封面图**：用 `--article-cover <img路径或URL>` 或在正文中插入图片，或用 `--auto-cover`（需配置 `IMAGE_API_KEY`）
-- **源码核实访问超时**：elixir.bootlin.com 或 cs.android.com 网络问题，可重试或手动查询
+- `invalid ip`：检查出口 IP 是否已加入公众号后台白名单
+- `invalid appid or secret`：检查 `.env` 中的 `WECHAT_APP_ID` 和 `WECHAT_APP_SECRET`
+- 未能找到文章标题：在 Markdown 顶部补 `title` 或等价 frontmatter
+- `archify` 不可用：退回 ASCII 图和表格，不阻塞发布主线
+- 源码核实超时：明确标注“待人工补充核实”，不要伪造校验结论
+
+## 最终检查清单
+
+- [ ] 已判断入口 A 或入口 B
+- [ ] 已得到可发布的 `article.md`
+- [ ] 已完成至少一轮内容改写或结构整理
+- [ ] 已补充必要图表或确认本次跳过图表增强
+- [ ] 已完成发布前检查，并明确记录未完成项
+- [ ] 已准备 `article-cover.png`
+- [ ] 已发布到微信草稿箱，或明确说明失败原因
+- [ ] 已归档到飞书，或明确说明归档未完成
+- [ ] 若执行 Skills 推荐文入口，是否已完成候选筛选和卡片整理
+- [ ] 若执行发布后三问，是否严格按 3 道题输出
+
+## 各能力分工
+
+| 环节 | 默认能力 | 责任 |
+|------|----------|------|
+| Skills 发现 | `find-skills` | 搜索和筛选候选 Skills |
+| 飞书读取 | `lark-doc` | 把飞书文档拉成 Markdown |
+| 正文改写 | 本 skill + `docs/style-guide.md` | 规定公众号结构和质量门槛 |
+| 技术图表 | `archify` + `docs/archify-requirements.md` + `docs/archify-export-sop.md` | 生成专业图表和导出图片 |
+| 发布前审查 | `wx-article-code-review` + `docs/review-cover-postpublish.md` | 做合规和技术准确性检查 |
+| 源码核实 | `aosp-linux-source` | 核对 AOSP/Linux 公开源码 |
+| 封面生成 | `guizang-social-card-skill` + `docs/review-cover-postpublish.md` | 生成公众号封面 |
+| 微信发布 | `feishu-wechat-cli` | 发布到微信草稿箱 |
+| 飞书归档 | `article-to-lark-doc` | 归档最终带图文章 |
+
+## 一句话原则
+
+先把文章变成“可公开发布、可被读懂、可被追溯”的版本，再去追求更完整的图表、封面和发布后互动；但只要进入某个阶段，就必须把该阶段对应的详细要求执行完整，不能因为主文件变短而少做步骤。
