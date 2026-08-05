@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Wrapper for the @shing19/feishu-wechat-cli skill.
+# Runs the built dist/cli.js with the user's current working directory
+# (so .env / scripts/generate-cover.py / .tmp are resolved relative to cwd,
+#  matching the upstream tool's expectations).
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+# Auto-provision scripts/generate-cover.py relative to cwd when --auto-cover
+# is requested and it is not already present (the tool resolves the script
+# relative to process.cwd()).
+for a in "$@"; do
+  case "$a" in
+    --auto-cover)
+      if [[ ! -f "./scripts/generate-cover.py" ]]; then
+        mkdir -p ./scripts
+        cp "$SKILL_DIR/scripts/generate-cover.py" ./scripts/generate-cover.py
+      fi
+      ;;
+  esac
+done
+
+# The package's dependency tree calls require() on an ESM module, which needs
+# a Node runtime with require(esm) support (Node >= 20.17 or >= 22.12). siada's
+# bundled Node may be older, so resolve a capable Node: nvm default -> highest
+# nvm node -> node on PATH.
+NODE_BIN=""
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+
+resolve_nvm_default_node() {
+  local root="$1"
+  [[ -d "$root/versions/node" ]] || return 1
+  local def=""
+  if [[ -f "$root/alias/default" ]]; then
+    def="$(tr -d '[:space:]' < "$root/alias/default")"
+  fi
+  while [[ -n "$def" && -f "$root/alias/$def" ]]; do
+    def="$(tr -d '[:space:]' < "$root/alias/$def")"
+  done
+  if [[ -n "$def" ]]; then
+    if [[ "$def" == *.* ]]; then
+      if [[ -x "$root/versions/node/v$def/bin/node" ]]; then
+        echo "$root/versions/node/v$def/bin/node"
+        return 0
+      fi
+    else
+      local best
+      best="$(ls -d "$root/versions/node/v$def".* 2>/dev/null | sort -V | tail -1 || true)"
+      if [[ -n "$best" && -x "$best/bin/node" ]]; then
+        echo "$best/bin/node"
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
+
+# Prefer the user's personal ~/.nvm (has capable Node builds); the NVM_DIR env
+# var may point at siada's own limited nvm, so try it only as a fallback.
+NODE_BIN="$(resolve_nvm_default_node "$HOME/.nvm" 2>/dev/null || true)"
+if [[ -z "$NODE_BIN" && "$NVM_DIR" != "$HOME/.nvm" ]]; then
+  NODE_BIN="$(resolve_nvm_default_node "$NVM_DIR" 2>/dev/null || true)"
+fi
+if [[ -z "$NODE_BIN" && -d "$HOME/.nvm/versions/node" ]]; then
+  best="$(ls -d "$HOME/.nvm/versions/node"/v* 2>/dev/null | sort -V | tail -1 || true)"
+  if [[ -n "$best" && -x "$best/bin/node" ]]; then
+    NODE_BIN="$best/bin/node"
+  fi
+fi
+if [[ -z "$NODE_BIN" ]]; then
+  NODE_BIN="$(command -v node || true)"
+fi
+if [[ -z "$NODE_BIN" ]]; then
+  echo "feishu-wechat: no Node.js runtime found." >&2
+  exit 127
+fi
+
+# Default to digua app ID as lark-cli profile (can be overridden via LARK_PROFILE env var)
+export LARK_PROFILE="${LARK_PROFILE:-cli_aa9245e43efadcd8}"
+
+exec "$NODE_BIN" "$SKILL_DIR/dist/cli.js" "$@"
