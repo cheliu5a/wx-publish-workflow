@@ -1,0 +1,162 @@
+# 审查、封面与发布后互动要求
+
+本文件保留原 workflow 中 Step 1.5、Step 1.9、Step 4 的详细要求。主 skill 到达对应阶段时，必须遵守本文件。
+
+## Step 1.5：源码合规审查 + 源码校验 + 优化润色
+
+优先触发 `wx-article-code-review`，并在需要时结合 `aosp-linux-source` 对 AOSP/Linux 公开源码做核实。
+
+推荐触发语：
+
+> 帮我审查 `article.md`，看看有没有内部代码，并对照 AOSP/Linux 源码优化润色。
+
+### 该步骤包含
+
+1. 合规性扫描，确认无企业私有代码
+2. 通过公开源码站点核实关键符号和技术结论
+3. 基于源码视角给出优化润色建议，包括：
+   - 修正与上游源码不符的技术描述
+   - 补充源码注释中的关键信息
+   - 为代码片段标注来源文件路径
+   - 标注版本差异
+
+### 审查通过条件
+
+- 无 `RED` 级问题
+- 无高风险私有信息暴露
+- 核心技术描述可被公开资料支持
+
+### 优化润色
+
+如果审查报告给出修订建议，应先修改文章，再进入发布步骤。
+
+### Linux 延迟系列：文末源码出处（硬规则）
+
+凡属于 Linux 延迟系列的文章，**每篇文章结尾都必须有 `## 源码参考` 章节**，置于互动问题之前或文章最终收束之后。不得仅在正文中零散提及源码，也不能只写“参考 Linux 内核源码”而不给读者可追溯入口。
+
+要求：
+
+1. 至少列出支撑文章核心机制的公开上游文件路径，例如 `mm/memory.c`、`mm/mmap.c`、`mm/oom_kill.c`、`kernel/rcu/*`、`fs/*`。
+2. 每项必须说明“机制/符号 → 源文件路径”，并链接到公开可访问的上游源码（优先 Linux mainline Elixir/Bootlin）。
+3. 文中引用具体函数、结构体或代码片段时，源码参考必须覆盖对应符号；涉及内核版本差异时注明版本范围。
+4. 发布前逐项检查链接可访问、路径与文中结论一致；不能核实的结论必须降级为待核实，不得伪造出处。
+
+验收：文章末尾存在明确的 `## 源码参考` 标题，且至少有一条与本文核心机制直接相关的公开源码链接；否则不得发布。
+
+## Step 1.9：自动生成文章封面
+
+正式发布前必须执行封面步骤。正文技术图不能机械替代封面图，封面负责点击，正文图负责解释。
+
+### 封面内容提取
+
+从以下内容提炼封面信息：
+
+- 标题
+- 故事钩子
+- 导语
+- 全文方法总结
+
+需要提炼出：
+
+1. 核心冲突
+2. 核心对象与动作
+3. 一个最值得视觉化的关系
+4. 封面文案
+
+### 封面规格构造（调用任何封面生成工具前必须执行）
+
+在调用封面生成工具（guizang-social-card-skill 或其他）之前，先把封面信息整理成完整规格，确保生成工具按同一规范输出：
+
+```text
+Asset type: WeChat article cover
+Primary request: [标题 + 核心冲突 + 核心方法]
+Aspect ratio: 2.35:1 wide cover
+Layout: title on the left half, workflow/system diagram on the right and lower area
+Text policy: Chinese text must be accurate and readable. The title must appear exactly as specified.
+Avoid: dark background, photorealistic people, brand logos, clutter, watermark, illegible tiny text
+```
+
+如果封面使用 AI 绘图工具生成，将上述规格作为提示词输入；如果使用 HTML/CSS 排版工具，将上述规格作为布局约束。
+
+### 默认方案
+
+优先使用 `guizang-social-card-skill` 生成两张封面：
+
+- 主封面：`2.35:1`，推荐 `2100 x 900`，文件名 `article-cover.png`
+- 方形封面：`1:1`，推荐 `1080 x 1080`，文件名 `article-cover-square.png`
+
+要求：
+
+- 同一视觉系统
+- 主标题清晰可读
+- 方形封面使用 4 到 10 字短标题
+- 不得出现内部系统名、内部路径、账号、token、车辆标识等私有信息
+
+### 导出操作
+
+1. 读取 `guizang-social-card-skill`，按文章主题选择合适风格
+2. 在文章目录创建 `cover-<slug>.html`
+3. 同页放置 21:9 和 1:1 两张封面布局
+4. 用 headless Chrome 截图导出
+5. 用 `file` 或 Pillow 校验实际像素比例
+6. 发布前确保主封面文件名为 `article-cover.png`
+
+示例：
+
+```bash
+google-chrome --headless --no-sandbox --disable-gpu --hide-scrollbars \
+  --screenshot=article-cover.png --window-size=2100,900 \
+  "file://$(pwd)/cover-<slug>.html#wide"
+
+google-chrome --headless --no-sandbox --disable-gpu --hide-scrollbars \
+  --screenshot=article-cover-square.png --window-size=1080,1080 \
+  "file://$(pwd)/cover-<slug>.html#square"
+
+file article-cover.png article-cover-square.png
+```
+
+### 兜底方案
+
+只有当封面生成能力不可用时，才允许从正文图片中选一张最相关的图作为临时封面。
+
+### 封面验收清单
+
+- [ ] 封面是否来自文章核心冲突和核心方法，而不是随便拿正文图？
+- [ ] 是否同时具备主封面和方形封面？
+- [ ] 主封面比例是否为 `2.35:1`，方形封面是否为 `1:1`？
+- [ ] 主标题和短标题是否清晰？
+- [ ] 是否没有大面积无效留白、工具栏、页脚、水印或私有信息？
+- [ ] 是否已将主封面命名为 `article-cover.png` 并用于发布？
+
+## Step 4：发布后三问
+
+发布成功后，默认应立即向用户提出 3 道理解性问题；只有当当前任务明确只要求发布、不要求互动时，才可跳过，但跳过时应显式说明。
+
+### 出题规则
+
+- 问题数量必须恰好 3 道
+- 题型可为概念理解、原理追问、场景应用、代码细节
+- 难度应覆盖文章核心知识点，不能全是死记硬背
+- 顺序为：整体概念 -> 原理机制 -> 实际应用或细节
+
+### 提问格式
+
+```text
+✅ 发布成功！
+
+📚 发布后三问，检验一下你是否真正掌握了这篇文章的核心：
+
+**Q1（概念）**：[针对文章核心概念的理解题]
+
+**Q2（原理）**：[针对关键机制或原理的追问题]
+
+**Q3（应用）**：[针对实际场景或代码细节的应用题]
+
+有想法就说出来，答完我来点评。
+```
+
+### 后续处理
+
+- 用户回答后，给出简洁点评
+- 如用户答对，可选地追问一个延伸问题
+- 不要展开成长篇教学，重点是检查是否真正理解
