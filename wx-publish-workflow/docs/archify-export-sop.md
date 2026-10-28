@@ -43,6 +43,32 @@ def remove_toolbar_footer(html_path):
 # 对所有待截图的 HTML 文件调用此函数
 ```
 
+## 步骤 1.5：视觉布局门禁（静态检查 + 打开预览）
+
+从 diagram JSON 渲染 HTML 后、生成或覆盖文章 PNG 前，必须先运行：
+
+```bash
+node ~/.siada-cli/skills/content/archify/bin/archify.mjs \
+  visual-check "${f}.html" "/tmp/${f}-visual-review.png"
+```
+
+该命令先执行 `archify check`，确认节点框可识别并检查节点框重叠、连线穿过非端点节点，以及并列泳道/阶段间距是否至少 `24px`；通过后在临时副本中移除 toolbar/footer DOM，用 headless Chrome 保存 light-theme 预览。**必须打开 `/tmp/${f}-visual-review.png` 逐张检查**，确认节点不粘连、箭头不穿过其他节点、分区间距清楚、文字没有截断或遮挡。静态检查失败或预览未检查通过时，调整 JSON 并重渲染；不得生成或覆盖文章引用的 PNG。
+
+预览图仅供验收，不是正文素材；检查后删除。不要把它命名为最终图，也不要从旧预览推断新 HTML 的结果。
+
+## 步骤 1.5：视觉布局门禁（静态检查 + 打开预览）
+
+从 diagram JSON 渲染 HTML 后、生成或覆盖文章 PNG 前，必须先运行：
+
+```bash
+node ~/.siada-cli/skills/content/archify/bin/archify.mjs \
+  visual-check "${f}.html" "/tmp/${f}-visual-review.png"
+```
+
+该命令先执行 `archify check`，检查节点框重叠、连线穿过非端点节点，以及并列泳道/阶段间距是否至少 `24px`；通过后在临时副本中移除 toolbar/footer DOM，用 headless Chrome 保存 light-theme 预览。**必须打开 `/tmp/${f}-visual-review.png` 逐张检查**，确认节点不粘连、箭头不穿过其他节点、分区间距清楚、文字没有截断或遮挡。静态检查失败或预览未检查通过时，调整 JSON 并重渲染；不得生成或覆盖文章引用的 PNG。
+
+预览图仅供验收，不是正文素材；检查后删除。不要把它命名为最终图，也不要从旧预览推断新 HTML 的结果。
+
 ## 步骤 2：用 headless Chrome 截图
 
 硬性要求：
@@ -50,6 +76,8 @@ def remove_toolbar_footer(html_path):
 - URL 必须加 `?theme=light`
 - 必须使用 `--force-device-scale-factor=2`
 - 窗口高度使用 `3000`，避免内容被截断
+- 截图中间文件统一命名为 `${f}-light.png`；禁止创建 `${f}-raw.png`、`${f}-source.png` 等另一份原始截图副本
+- `${f}-light.png` 是待裁切的唯一截图输入；裁切结果直接覆盖为文章引用的 `${f}.png`
 
 ```bash
 google-chrome --headless --no-sandbox --disable-gpu \
@@ -63,6 +91,31 @@ google-chrome --headless --no-sandbox --disable-gpu \
 - `?theme=light` 确保输出白色背景
 - `--force-device-scale-factor=2` 生成 2x Retina 级别截图
 - `1200 x 3000` 是稳定的默认窗口尺寸，适合大多数图表页面
+- 不要在截图完成后复制、重命名或另存 `-raw.png`；背景色差异裁切直接读取 `-light.png`，并写入最终 PNG
+
+## 公众号正文图可读性硬规则
+
+公众号会将正文图片按约 `1080px` 宽展示并可能重编码。因此，不能只以源 PNG 像素很大或使用了 Retina 截图作为“清晰”的依据；必须以读者实际看到的 `1080px` 宽效果验收。
+
+1. 所有正文图导出后，必须生成一份宽度为 `1080px` 的预览图，并逐张检查文字可读性。
+2. 图中普通文字在最终 `1080px` 预览中不得小于约 `24px`；箭头标签、关键结论和节点标题建议 `28px` 以上。达不到则增大原始字体、减少节点，或拆成多张图。
+3. 不得为了塞进一张图而缩小字体、压缩节点间距或堆叠过多箭头。单图无法让读者无需放大就读清时，必须拆图。
+4. 正文图优先采用接近公众号宽屏阅读的横向比例；纵向过长的流程图应按阶段拆分，避免读者在手机上反复缩放。
+5. 发布前以 `1080px` 预览为准验收：文字、箭头方向、标签归属和细线都必须清晰；任何一项不清晰即返工，不得发布。
+6. `1080px` 预览是临时验收产物，检查完成后删除，不得长期留在文章目录；不得将它引用到正文或归档。
+
+示例预览命令：
+
+```bash
+env -u PYTHONPATH python3 - <<'PY'
+from PIL import Image
+src = 'diagram-light.png'
+im = Image.open(src)
+w = 1080
+h = round(im.height * w / im.width)
+im.resize((w, h), Image.Resampling.LANCZOS).save('diagram-wechat-preview.png')
+PY
+```
 
 ## 步骤 3：用 PIL + numpy 做背景色差异裁剪
 
@@ -111,20 +164,36 @@ def smart_crop(image_path, output_path=None, tolerance=8, padding=30):
     return output_path
 ```
 
+裁剪后的主图应直接写回最终文件名（例如 `diagram.png`），不要另留 `diagram-cropped.png` 或 `diagram-raw.png` 副本。唯一截图输入 `diagram-light.png` 只在当次裁剪和质量检查期间保留；它是未经裁剪的临时输入，可能带有大块留白，绝不能作为交付图长期保存。
+
 ## 推荐执行顺序
 
 1. 生成 `.html`
-2. 对每个 `.html` 执行 `remove_toolbar_footer`
-3. 用 headless Chrome 生成 `-light.png`
-4. 对 `-light.png` 执行 `smart_crop`
-5. 检查输出图是否白底、无按钮、无页脚、无灰边
-6. 将裁剪后的 PNG 嵌入 `article.md`
+2. 仅对本次图表 HTML 执行 `remove_toolbar_footer`，不可对目录内所有 HTML 使用通配符；这会误删封面等无关页面中的节点。
+3. 用 headless Chrome 将唯一原始截图写为 `-light.png`（不另存 `-raw.png`）
+4. 对 `-light.png` 执行 `smart_crop`，输出路径明确指定为对应最终 `<name>.png`
+5. 检查输出图是否白底、无按钮、无页脚、无灰边，并生成 1080px 临时预览检查可读性
+6. 将裁剪后的最终 PNG 嵌入 `article.md`
+7. 预览检查通过后立即删除对应 `-raw.png`（如旧流程已产生）、`-light.png`、`-wechat-preview.png` / `-preview1080.png` 临时文件；保留最终 PNG、Archify HTML 和 JSON 源文件
+
+### 文件保留规则
+
+每张图只长期保留一张发布用 PNG。标准命名为 `图表名.png`，即 `article.md` 中实际引用的文件。可重新生成的截图、缩放预览和临时裁剪版本不属于交付文件，检查结束后必须清理。未经裁剪且带有大块留白的 `-light.png` 不得长期保存，也不得作为正文或归档图片。
+
+- 长期保留：`<name>.png`（文章引用的最终裁剪图）、对应 Archify `.html` 和 `.json`
+- 禁止新生成：`<name>-raw.png`；检查后删除旧流程遗留的同名文件
+- 检查后删除：`<name>-light.png`、`<name>-wechat-preview.png`、`<name>-preview1080.png`、`<name>-cropped.png`
+- 删除前先确认文件名不在 `article.md` 的图片引用中；只删当前文章中确认由本 SOP 生成的文件，不跨目录按通配符删除
+- 若要重新检查清晰度，从最终 PNG 临时生成 1080px 预览，检查后立即删除
 
 ## 最终验收
 
 - [ ] HTML 中已删除 `.toolbar` 和 `.footer` 的 DOM 节点
 - [ ] 截图 URL 已加 `?theme=light`
 - [ ] 已使用 `--force-device-scale-factor=2`
+- [ ] 唯一截图中间文件名为 `-light.png`，没有生成 `-raw.png` 副本
 - [ ] 已采用背景色差异法裁剪而不是固定亮度阈值
 - [ ] 输出 PNG 白底、清晰、无按钮、无页脚、无大片灰边
 - [ ] PNG 已嵌回正文对应章节
+- [ ] 1080px 预览检查后，所有原始截图与预览临时文件已立即删除；没有遗留带大块留白的 `-light.png`
+- [ ] 正文每张图只有一个发布用 PNG；无重复裁剪版或预览副本
