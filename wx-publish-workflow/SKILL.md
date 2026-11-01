@@ -69,7 +69,7 @@ description: Use when publishing a Feishu doc or local Markdown article to a WeC
 当某个依赖不可用时，按以下方式降级，不要卡死在中间步骤：
 
 - 缺少 `find-skills`：跳过线上发现入口，只处理现有文章
-- 缺少 `archify`：保留 ASCII 图和 Markdown 表格，不阻塞发布
+- 缺少 `archify`：文章正文保留 ASCII 图和 Markdown 表格，不阻塞发布；对话中的临时说明图可直接输出 Mermaid
 - 缺少 `lanshu-animated-architecture-diagram`：跳过动图封面，回归正常封面生成流程
 - 缺少 `drawio-mcp`：跳过 draw.io 图表生成，使用 archify 或 ASCII 图代替
 - 缺少 `wx-article-code-review`：至少做一轮人工可读的公开信息合规检查，并明确标注“未完成正式审查”
@@ -204,7 +204,12 @@ lark-cli docs +fetch --api-version v2 \
 
 ### Step 3：补充专业图表
 
-如果文章是技术分析、架构拆解、源码机制说明，优先调用 `archify` 补专业图表；如果 `archify` 不可用，则保留 ASCII 图和表格即可。
+先区分图表的交付位置：
+
+- **只用于当前对话讲解、且用户希望在终端查看的图：**可直接输出 `mermaid` 代码块，由 Siada 在终端渲染；无需进入文章制图和 PNG 导出流程。
+- **需要嵌入公众号正文的正式图表：**技术分析、架构拆解、源码机制说明优先调用 `archify`，并按下方支持文档完成 HTML、PNG 导出与检查。公众号正文不直接依赖终端 Mermaid 渲染；缺少 `archify` 时，使用微信兼容的 ASCII 图或表格。
+
+终端 Mermaid 输出与 Archify 正文制图是两条按交付位置选择的路径，不互相替代。若同一图既要用于对话讲解、又要用于文章正文，可分别生成终端 Mermaid 和文章正式图，不得把终端渲染结果当成已完成的正文图片。
 
 进入本步骤且实际调用 `archify` 时，必须读取并遵守：
 

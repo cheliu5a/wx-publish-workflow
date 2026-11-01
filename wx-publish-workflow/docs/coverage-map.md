@@ -52,6 +52,7 @@
 
 | 原能力 | 现在位置 | 说明 |
 |--------|----------|------|
+| 对话中的临时说明图可直接输出 Mermaid，由 Siada 在终端渲染；不替代文章正式图表 | [`wx-publish-workflow/SKILL.md`](../SKILL.md)、[`style-guide.md`](style-guide.md) | 新增终端讲解图与公众号正文图的交付边界 |
 | 每篇 `archify` 图 >= 3 | [`archify-requirements.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/archify-requirements.md:7) | 保留 |
 | 至少 2 种图表类型，同类型不超过 2 张 | [`archify-requirements.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/archify-requirements.md:8) | 保留 |
 | 图表均匀分布 | [`archify-requirements.md`](/home/lixiang/.siada-cli/skills/content/wx-publish-workflow/docs/archify-requirements.md:10) | 保留 |
